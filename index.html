@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Hỗ Trợ Phát Hiện Sớm Thiếu Máu Cơ Tim</title>
+
+  <!-- Bootstrap 5 -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  >
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      background: #f4f6f9;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    }
+    .app-container {
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 10px;
+    }
+    .card {
+      border-radius: 16px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+      border: none;
+    }
+    .step-title {
+      font-weight: 600;
+      font-size: 1.2rem;
+      margin-bottom: 10px;
+    }
+    .btn-main {
+      border-radius: 999px;
+      padding-left: 20px;
+      padding-right: 20px;
+    }
+    .progress {
+      height: 8px;
+      border-radius: 999px;
+      overflow: hidden;
+      background-color: #e5e7eb;
+    }
+    .progress-bar {
+      background: linear-gradient(90deg, #2563eb, #22c55e);
+    }
+    .risk-card {
+      border-radius: 16px;
+      padding: 16px;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    .risk-red { background: #dc2626; }
+    .risk-orange { background: #ea580c; }
+    .risk-yellow {
+      background: #facc15;
+      color: #000;
+    }
+    .risk-green {
+      background: #16a34a;
+    }
+    .badge-pill {
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.75rem;
+    }
+    .ecg-preview {
+      max-width: 100%;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      margin-top: 10px;
+    }
+    .small-text {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+    .disclaimer {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-top: 10px;
+    }
+    .step-indicator {
+      font-size: 0.85rem;
+      color: #6b7280;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app-container">
+    <div class="card p-3 p-md-4">
+      <!-- Header -->
+      <div class="mb-3">
+        <h3 class="mb-1">AI Hỗ Trợ Thiếu Máu Cơ Tim</h3>
+        <p class="small-text mb-1">
+          Công cụ hỗ trợ bác sĩ tuyến cơ sở sàng lọc thiếu máu cơ tim dựa trên
+          lâm sàng và ECG. Không thay thế bác sĩ tim mạch hay xét nghiệm.
+        </p>
+        <div class="step-indicator">
+          Bước <span id="currentStepText">0</span> / 4
+        </div>
+        <div class="progress mt-1 mb-2">
+          <div
+            id="progressBar"
+            class="progress-bar"
+            role="progressbar"
+            style="width: 0%;"
+          ></div>
+        </div>
+      </div>
+
+      <!-- CONTENT: các bước -->
+      <div id="stepContainer">
+        <!-- Bước 0: Intro -->
+        <div id="step-0" class="step-view">
+          <div class="step-title">Giới thiệu</div>
+          <p>
+            Ứng dụng này được thiết kế để hỗ trợ bác sĩ tuyến cơ sở
+            <strong>phát hiện sớm thiếu máu cơ tim</strong> dựa trên:
+          </p>
+          <ul>
+            <li>Dấu hiệu sinh tồn & yếu tố nguy cơ</li>
+            <li>Điện tim 12 chuyển đạo (ECG)</li>
+            <li>Triệu chứng đau ngực & HEAR score</li>
+          </ul>
+          <p class="small-text">
+            Cảnh báo: Công cụ chỉ mang tính hỗ trợ, không phải thiết bị y tế
+            được phê duyệt. Quyết định cuối cùng thuộc về bác sĩ điều trị.
+          </p>
+          <div class="d-flex justify-content-end mt-3">
+            <button
+              class="btn btn-primary btn-main"
+              onclick="goToStep(1)"
+            >
+              Bắt đầu đánh giá
+            </button>
+          </div>
+        </div>
+
+        <!-- Bước 1: Thông tin cơ bản -->
+        <div id="step-1" class="step-view d-none">
+          <div class="step-title">Bước 1 – Thông tin cơ bản & sinh tồn</div>
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Tuổi</label>
+              <input type="number" id="age" class="form-control" placeholder="Năm tuổi">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Giới</label>
+              <select id="sex" class="form-select">
+                <option value="">Chọn</option>
+                <option value="male">Nam</option>
+                <option value="female">Nữ</option>
+                <option value="other">Khác</option>
+              </select>
+            </div>
+          </div>
+
+          <hr>
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">HATT (mmHg)</label>
+              <input type="number" id="sbp" class="form-control" placeholder="VD: 120">
+            </div>
+            <div class="col-6">
+              <label class="form-label">HATTr (mmHg)</label>
+              <input type="number" id="dbp" class="form-control" placeholder="VD: 80">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Mạch (lần/phút)</label>
+              <input type="number" id="hr" class="form-control" placeholder="VD: 80">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Nhịp thở (lần/phút)</label>
+              <input type="number" id="rr" class="form-control" placeholder="VD: 18">
+            </div>
+            <div class="col-6">
+              <label class="form-label">SpO₂ (%)</label>
+              <input type="number" id="spo2" class="form-control" placeholder="VD: 97">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Nhiệt độ (°C)</label>
+              <input type="number" step="0.1" id="temp" class="form-control" placeholder="VD: 37.0">
+            </div>
+          </div>
+
+          <hr>
+
+          <label class="form-label mb-1">Yếu tố nguy cơ tim mạch</label>
+          <div class="small-text mb-1">
+            Tích chọn những yếu tố bệnh nhân có:
+          </div>
+          <div class="row g-1 small-text">
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="rf-htn">
+                <label class="form-check-label" for="rf-htn">Tăng huyết áp</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="rf-dm">
+                <label class="form-check-label" for="rf-dm">Đái tháo đường</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="rf-dyslip">
+                <label class="form-check-label" for="rf-dyslip">Rối loạn mỡ máu</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="rf-smoke">
+                <label class="form-check-label" for="rf-smoke">Hút thuốc</label>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="rf-cad">
+                <label class="form-check-label" for="rf-cad">
+                  Bệnh mạch vành đã biết (NMCT, stent, bắc cầu...)
+                </label>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="rf-ckd">
+                <label class="form-check-label" for="rf-ckd">
+                  Bệnh thận mạn (GFR &lt; 60)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-between mt-3">
+            <button class="btn btn-outline-secondary btn-main" onclick="goToStep(0)">
+              Quay lại
+            </button>
+            <button class="btn btn-primary btn-main" onclick="goToStep(2)">
+              Tiếp tục
+            </button>
+          </div>
+        </div>
+
+        <!-- Bước 2: ECG -->
+        <div id="step-2" class="step-view d-none">
+          <div class="step-title">Bước 2 – ECG 12 chuyển đạo</div>
+
+          <p class="small-text">
+            Chụp hoặc tải lên hình ECG 12 chuyển đạo (rõ, đủ vạch chuẩn). Bản demo này
+            <strong>chỉ xử lý giả lập</strong>, không gửi dữ liệu lên server.
+          </p>
+
+          <div class="mb-2">
+            <label class="form-label">Chọn file ECG (JPG, PNG)</label>
+            <input
+              type="file"
+              id="ecgFileInput"
+              accept="image/*"
+              class="form-control"
+              onchange="handleECGFileChange(event)"
+            >
+          </div>
+
+          <div id="ecgPreviewContainer" class="d-none">
+            <img id="ecgPreview" class="ecg-preview" alt="ECG preview">
+          </div>
+
+          <button
+            class="btn btn-secondary btn-sm mt-2"
+            onclick="simulateAIAnalyzeECG()"
+          >
+            Phân tích ECG bằng AI (mô phỏng)
+          </button>
+
+          <div id="aiResultContainer" class="mt-3 d-none">
+            <h6>Kết quả phân tích ECG (AI – mô phỏng)</h6>
+            <pre
+              id="aiResultJson"
+              class="small-text"
+              style="background:#0f172a;color:#e5e7eb;border-radius:12px;padding:10px;max-height:250px;overflow:auto;"
+            ></pre>
+            <div
+              id="aiResultSummary"
+              class="small-text mt-1"
+              style="font-style:italic;"
+            ></div>
+          </div>
+
+          <div class="d-flex justify-content-between mt-3">
+            <button class="btn btn-outline-secondary btn-main" onclick="goToStep(1)">
+              Quay lại
+            </button>
+            <button class="btn btn-primary btn-main" onclick="goToStep(3)">
+              Tiếp tục
+            </button>
+          </div>
+        </div>
+
+        <!-- Bước 3: Triệu chứng & HEAR -->
+        <div id="step-3" class="step-view d-none">
+          <div class="step-title">Bước 3 – Triệu chứng & HEAR</div>
+
+          <label class="form-label">Loại đau ngực</label>
+          <select id="historyType" class="form-select mb-2">
+            <option value="">Chọn</option>
+            <option value="typical">
+              Điển hình thiếu máu cơ tim (sau xương ức, đè nặng, gắng sức...)
+            </option>
+            <option value="atypical">
+              Không điển hình (1–2 đặc điểm gợi ý)
+            </option>
+            <option value="nonanginal">
+              Không gợi ý thiếu máu cơ tim (đau sắc, tăng khi ấn, thay đổi tư thế...)
+            </option>
+          </select>
+
+          <label class="form-label">Thời gian cơn đau hiện tại</label>
+          <select id="painDuration" class="form-select mb-2">
+            <option value="">Chọn</option>
+            <option value="<5"> &lt; 5 phút</option>
+            <option value="5-20">5–20 phút</option>
+            <option value="20-720">20 phút – 12 giờ</option>
+            <option value=">720">&gt; 12 giờ / kéo dài</option>
+          </select>
+
+          <label class="form-label">Triệu chứng kèm theo</label>
+          <div class="row g-1 small-text mb-2">
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sx-dyspnea">
+                <label class="form-check-label" for="sx-dyspnea">Khó thở</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sx-sweat">
+                <label class="form-check-label" for="sx-sweat">Vã mồ hôi / buồn nôn</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sx-radiate">
+                <label class="form-check-label" for="sx-radiate">Đau lan tay trái/hàm/lưng</label>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sx-syncope">
+                <label class="form-check-label" for="sx-syncope">Ngất / tiền ngất</label>
+              </div>
+            </div>
+          </div>
+
+          <hr>
+
+          <button
+            class="btn btn-outline-primary btn-sm"
+            onclick="calculateHearPreview()"
+          >
+            Tính HEAR sơ bộ
+          </button>
+
+          <div id="hearPreviewContainer" class="mt-2 d-none small-text">
+            <div><strong>HEAR score (sơ bộ):</strong> <span id="hearScoreText"></span></div>
+            <div id="hearRiskText"></div>
+          </div>
+
+          <div class="d-flex justify-content-between mt-3">
+            <button class="btn btn-outline-secondary btn-main" onclick="goToStep(2)">
+              Quay lại
+            </button>
+            <button class="btn btn-primary btn-main" onclick="goToStep(4)">
+              Xem kết quả AI & khuyến cáo
+            </button>
+          </div>
+        </div>
+
+        <!-- Bước 4: Kết quả & khuyến cáo -->
+        <div id="step-4" class="step-view d-none">
+          <div class="step-title">Bước 4 – Kết quả AI & khuyến cáo</div>
+
+          <div id="riskCardContainer" class="mb-3"></div>
+
+          <div class="mb-2">
+            <h6>Chi tiết HEAR score</h6>
+            <div class="small-text" id="hearDetailText"></div>
+          </div>
+
+          <div class="mb-2">
+            <h6>Tóm tắt ECG (AI – mô phỏng)</h6>
+            <div class="small-text" id="ecgSummaryText"></div>
+          </div>
+
+          <button
+            class="btn btn-link btn-sm p-0 mb-2"
+            onclick="toggleExplain()"
+          >
+            <span id="explainToggleText">Xem giải thích chi tiết & hạn chế AI</span>
+          </button>
+
+          <div id="explainContainer" class="small-text d-none">
+            <p><strong>Giải thích HEAR score:</strong></p>
+            <ul>
+              <li>H – History (triệu chứng đau ngực)</li>
+              <li>E – ECG (thay đổi thiếu máu cơ tim)</li>
+              <li>A – Age (tuổi bệnh nhân)</li>
+              <li>R – Risk factors (yếu tố nguy cơ tim mạch)</li>
+            </ul>
+            <p>
+              Điểm HEAR càng cao → nguy cơ hội chứng vành cấp càng lớn, đặc biệt khi kết hợp
+              ECG bất thường.
+            </p>
+            <p><strong>Hạn chế AI:</strong> Mô hình AI đọc ECG có thể bỏ sót tổn thương nhỏ, chất lượng ECG kém
+            hoặc biến đổi sớm. Luôn kết hợp lâm sàng, troponin (nếu có) và ý kiến chuyên khoa.</p>
+            <p><strong>Lưu ý pháp lý:</strong> Đây là bản demo phục vụ mục đích đào tạo và minh hoạ ý tưởng, không
+            phải thiết bị y tế được phê duyệt.</p>
+          </div>
+
+          <div class="d-flex justify-content-between mt-3">
+            <button class="btn btn-outline-secondary btn-main" onclick="goToStep(3)">
+              Quay lại
+            </button>
+            <button class="btn btn-success btn-main" onclick="resetAll()">
+              Làm lại ca mới
+            </button>
+          </div>
+
+          <div class="disclaimer">
+            Công cụ này không lưu thông tin cá nhân hoặc hình ảnh ECG lên server (trong demo).
+            Khi triển khai thực tế, cần tuân thủ quy định về bảo mật dữ liệu y tế.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JS -->
+  <script src="app.js"></script>
+</body>
+</html>
