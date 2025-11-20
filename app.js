@@ -1,400 +1,296 @@
-// ======================
-// Trạng thái toàn cục
-// ======================
-const state = {
-  basic: {},     // age, sex, vitals, risk factors
-  ecgAI: null,   // kết quả AI mô phỏng
-  symptoms: {},  // history, duration, sx...
-  hearScore: null,
-  hearDetail: null,
-  riskLevel: null,
-};
-
-// ======================
-// Điều khiển bước & progress
-// ======================
+// Điều hướng bước
 function goToStep(step) {
-  // 0..4
-  for (let i = 0; i <= 4; i++) {
-    const el = document.getElementById(`step-${i}`);
-    if (!el) continue;
-    if (i === step) {
-      el.classList.remove("d-none");
-    } else {
-      el.classList.add("d-none");
-    }
+  for (let i = 1; i <= 4; i++) {
+    document.getElementById("step" + i).classList.add("hidden");
+    document.getElementById("stepLabel" + i).classList.remove("active");
   }
+  document.getElementById("step" + step).classList.remove("hidden");
+  document.getElementById("stepLabel" + step).classList.add("active");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
 
-  // cập nhật text & progress
-  const currentText = document.getElementById("currentStepText");
-  const progressBar = document.getElementById("progressBar");
-
-  currentText.textContent = step;
-  const percent = (step / 4) * 100;
-  progressBar.style.width = `${percent}%`;
-
-  // nếu chuyển sang step 4 thì tính toán kết quả
-  if (step === 4) {
-    collectAllInputs();
-    computeHearAndRisk();
-    renderResult();
+// Tách SBP từ "110/70" hoặc "110"
+function parseBloodPressure(text) {
+  if (!text) return { sbp: NaN, dbp: NaN };
+  const cleaned = text.replace(/\s+/g, "");
+  const parts = cleaned.split("/");
+  if (parts.length === 2) {
+    return { sbp: parseInt(parts[0]), dbp: parseInt(parts[1]) };
   }
+  return { sbp: parseInt(cleaned), dbp: NaN };
 }
 
-// Reset toàn bộ
-function resetAll() {
-  window.location.reload();
+// HEAR score (tham khảo)
+function calculateHEAR() {
+  let H = 0, E = 0, A = 0, R = 0;
+
+  const symptomCount = document.querySelectorAll(".symptom:checked").length;
+  if (symptomCount <= 2) H = 0;
+  else if (symptomCount <= 4) H = 1;
+  else H = 2;
+
+  const ischemia = document.getElementById("ecgIschemia").checked;
+  const other = document.getElementById("ecgOtherAbnormal").checked;
+  if (!ischemia && !other) E = 0;
+  else if (other && !ischemia) E = 1;
+  else if (ischemia) E = 2;
+
+  const age = parseInt(document.getElementById("patientAge").value);
+  if (age < 45) A = 0;
+  else if (age < 65) A = 1;
+  else A = 2;
+
+  const riskCount = document.querySelectorAll(".risk:checked").length;
+  if (riskCount === 0) R = 0;
+  else if (riskCount <= 2) R = 1;
+  else R = 2;
+
+  return { H, E, A, R, total: H + E + A + R };
 }
 
 // ======================
-// Bước 1: Lưu thông tin cơ bản
+// ECG PREVIEW + "AI" DEMO
 // ======================
-function collectBasicInfo() {
-  const age = parseInt(document.getElementById("age").value || "0", 10);
-  const sex = document.getElementById("sex").value;
-  const sbp = parseInt(document.getElementById("sbp").value || "0", 10);
-  const dbp = parseInt(document.getElementById("dbp").value || "0", 10);
-  const hr = parseInt(document.getElementById("hr").value || "0", 10);
-  const rr = parseInt(document.getElementById("rr").value || "0", 10);
-  const spo2 = parseInt(document.getElementById("spo2").value || "0", 10);
-  const temp = parseFloat(document.getElementById("temp").value || "0");
+const ecgFileInput = document.getElementById("ecgFile");
+const ecgPreview = document.getElementById("ecgPreview");
+const ecgStatus = document.getElementById("ecgStatus");
 
-  const riskFactors = {
-    htn: document.getElementById("rf-htn").checked,
-    dm: document.getElementById("rf-dm").checked,
-    dyslip: document.getElementById("rf-dyslip").checked,
-    smoke: document.getElementById("rf-smoke").checked,
-    cad: document.getElementById("rf-cad").checked,
-    ckd: document.getElementById("rf-ckd").checked,
-  };
-
-  state.basic = { age, sex, sbp, dbp, hr, rr, spo2, temp, riskFactors };
-}
-
-// ======================
-// Bước 2: ECG – preview & mô phỏng AI
-// ======================
-function handleECGFileChange(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+ecgFileInput.addEventListener("change", async function () {
+  const file = this.files[0];
+  if (!file) {
+    ecgPreview.innerHTML = "Chưa có ảnh ECG.";
+    ecgStatus.textContent = "";
+    return;
+  }
 
   const reader = new FileReader();
   reader.onload = function (e) {
-    const img = document.getElementById("ecgPreview");
-    const container = document.getElementById("ecgPreviewContainer");
+    ecgPreview.innerHTML = "Ảnh ECG xem trước:";
+    const img = document.createElement("img");
     img.src = e.target.result;
-    container.classList.remove("d-none");
+    ecgPreview.appendChild(img);
   };
   reader.readAsDataURL(file);
-}
 
-// Mô phỏng API AI phân tích ECG (demo, không thật)
-function simulateAIAnalyzeECG() {
-  // Lấy lại thông tin cơ bản để mô phỏng hợp lý hơn
-  collectBasicInfo();
-  const hr = state.basic.hr || 80;
+  await callBackendDemo(file);
+});
 
-  // logic mô phỏng rất đơn giản:
-  let stElevation = false;
-  let stDepression = false;
-  let tInversion = false;
+// ⚠️ Hàm này hiện tại là "AI mô phỏng" để demo trên GitHub Pages.
+// Sau này IT chỉ cần thay thành fetch() tới API thật.
+async function callBackendDemo(file) {
+  ecgStatus.textContent = "AI đang phân tích ECG (demo)...";
+  ecgStatus.className = "status-text status-loading";
 
-  // giả định nhịp nhanh, ST chênh lên khi mạch > 100, hoặc random
-  if (hr > 100) {
-    stElevation = true;
-    tInversion = true;
+  // giả lập trễ 1.2s
+  await new Promise(resolve => setTimeout(resolve, 1200));
+
+  const age = parseInt(document.getElementById("patientAge").value) || 0;
+
+  let ischemia = false;
+  let dangerousArr = false;
+  let otherAbn = false;
+
+  if (age >= 65) {
+    ischemia = true;
+    otherAbn = true;
+  } else if (age >= 45) {
+    ischemia = true;
   } else {
-    // tỉ lệ nhỏ có ST chênh xuống
-    stDepression = Math.random() < 0.3;
-    tInversion = Math.random() < 0.4;
+    otherAbn = true;
   }
 
-  const result = {
-    rhythm: hr > 100 ? `Sinus tachycardia ${hr} bpm` : `Sinus rhythm ${hr} bpm`,
-    st_elevation: {
-      present: stElevation,
-      leads: stElevation ? ["V2", "V3", "V4"] : [],
-      max_mm: stElevation ? 3.0 : 0.0,
-    },
-    st_depression: {
-      present: stDepression,
-      leads: stDepression ? ["V5", "V6"] : [],
-      max_mm: stDepression ? 2.0 : 0.0,
-    },
-    t_wave_inversion: {
-      present: tInversion,
-      leads: tInversion ? ["V4", "V5", "V6"] : [],
-    },
-    pathologic_q: {
-      present: false,
-      leads: [],
-    },
-    other_findings: [],
-    quality_flag: "good",
-  };
-
-  state.ecgAI = result;
-
-  // hiển thị JSON & tóm tắt mô phỏng
-  const container = document.getElementById("aiResultContainer");
-  const jsonEl = document.getElementById("aiResultJson");
-  const summaryEl = document.getElementById("aiResultSummary");
-
-  jsonEl.textContent = JSON.stringify(result, null, 2);
-
-  let summary = result.rhythm + ". ";
-  if (result.st_elevation.present) {
-    summary += `ST chênh lên khoảng ${result.st_elevation.max_mm} mm ở ${result.st_elevation.leads.join(", ")}. `;
-  }
-  if (result.st_depression.present) {
-    summary += `ST chênh xuống ở ${result.st_depression.leads.join(", ")}. `;
-  }
-  if (result.t_wave_inversion.present) {
-    summary += `T đảo ở ${result.t_wave_inversion.leads.join(", ")}. `;
-  }
-  if (!result.st_elevation.present && !result.st_depression.present && !result.t_wave_inversion.present) {
-    summary += "Không thấy thay đổi ST-T đáng kể (mô phỏng).";
+  const fileName = file.name.toLowerCase();
+  if (fileName.includes("vt") || fileName.includes("vf")) {
+    dangerousArr = true;
+    ischemia = false;
   }
 
-  summaryEl.textContent = summary;
+  document.getElementById("ecgIschemia").checked = ischemia;
+  document.getElementById("ecgDangerousRhythm").checked = dangerousArr;
+  document.getElementById("ecgOtherAbnormal").checked = otherAbn;
 
-  container.classList.remove("d-none");
+  let msg = "AI demo: ";
+  msg += ischemia ? "nghi thiếu máu cơ tim; " : "không rõ thiếu máu cơ tim; ";
+  msg += dangerousArr ? "có rối loạn nhịp nguy hiểm; " : "không thấy rối loạn nhịp nguy hiểm; ";
+  msg += otherAbn ? "có bất thường ECG khác." : "không ghi nhận bất thường khác.";
+  ecgStatus.textContent = msg;
+  ecgStatus.className = "status-text status-success";
 }
 
 // ======================
-// Bước 3: Triệu chứng & HEAR preview
+// LOGIC 4 MÀU – 4 KHUYẾN CÁO
 // ======================
-function collectSymptomInfo() {
-  const historyType = document.getElementById("historyType").value;
-  const painDuration = document.getElementById("painDuration").value;
-  const sxDyspnea = document.getElementById("sx-dyspnea").checked;
-  const sxSweat = document.getElementById("sx-sweat").checked;
-  const sxRadiate = document.getElementById("sx-radiate").checked;
-  const sxSyncope = document.getElementById("sx-syncope").checked;
+function calculateAndShowResult() {
+  const bpText = document.getElementById("bp").value;
+  const { sbp } = parseBloodPressure(bpText);
+  const hr = parseInt(document.getElementById("hr").value);
+  const rr = parseInt(document.getElementById("rr").value);
+  const spo2 = parseInt(document.getElementById("spo2").value);
+  const consciousness = document.getElementById("consciousness").value;
 
-  state.symptoms = {
-    historyType,
-    painDuration,
-    sxDyspnea,
-    sxSweat,
-    sxRadiate,
-    sxSyncope,
-  };
-}
+  let vitalsCritical = false;
+  let vitalReasons = [];
 
-function calculateHearPreview() {
-  collectBasicInfo();
-  collectSymptomInfo();
-  computeHearAndRisk(true); // chỉ tính HEAR, chưa xuất risk card
-  if (state.hearScore != null) {
-    const container = document.getElementById("hearPreviewContainer");
-    const scoreText = document.getElementById("hearScoreText");
-    const riskText = document.getElementById("hearRiskText");
+  if (!isNaN(sbp) && sbp < 90) {
+    vitalsCritical = true;
+    vitalReasons.push("Huyết áp thấp (SBP < 90 mmHg)");
+  }
+  if (!isNaN(hr) && (hr < 40 || hr > 140)) {
+    vitalsCritical = true;
+    vitalReasons.push("Mạch bất thường (< 40 hoặc > 140 l/p)");
+  }
+  if (!isNaN(rr) && rr > 30) {
+    vitalsCritical = true;
+    vitalReasons.push("Nhịp thở nhanh (> 30 l/p)");
+  }
+  if (!isNaN(spo2) && spo2 < 90) {
+    vitalsCritical = true;
+    vitalReasons.push("SpO₂ thấp (< 90%)");
+  }
+  if (consciousness !== "tinh") {
+    vitalsCritical = true;
+    vitalReasons.push("Tri giác không tỉnh táo");
+  }
 
-    scoreText.textContent = `${state.hearScore} điểm`;
+  const dangerousRhythm = document.getElementById("ecgDangerousRhythm").checked;
+  const ecgIschemia = document.getElementById("ecgIschemia").checked;
+  const ecgOther = document.getElementById("ecgOtherAbnormal").checked;
 
-    let desc = "";
-    if (state.hearScore <= 2) {
-      desc = "Nguy cơ thấp (theo HEAR – demo).";
-    } else if (state.hearScore <= 4) {
-      desc = "Nguy cơ trung bình.";
+  const symptomsChecked = document.querySelectorAll(".symptom:checked").length;
+  const riskChecked = document.querySelectorAll(".risk:checked").length;
+
+  let riskClass = "";
+  let riskTitle = "";
+  let riskSubtitle = "";
+  let vitalExplain = "";
+  let rhythmExplain = "";
+  let ischemiaExplain = "";
+  let recommendations = [];
+  let probability = 0;
+
+  // 1) ĐỎ – NGUY KỊCH
+  if (vitalsCritical) {
+    riskClass = "risk-critical";
+    riskTitle = "ĐỎ – NGUY KỊCH (ƯU TIÊN CẤP CỨU)";
+    riskSubtitle = "Chỉ số sinh tồn không ổn định, nguy cơ đe dọa tính mạng.";
+    vitalExplain = "AI Safety: phát hiện bất thường sinh tồn: " + vitalReasons.join("; ") + ".";
+    rhythmExplain = "AI Rhythm: đánh giá nhịp sau khi đã ổn định huyết động.";
+    ischemiaExplain = "AI thiếu máu cơ tim chỉ mang tính tham khảo, không trì hoãn cấp cứu.";
+    recommendations = [
+      "Xử trí ABC ngay (đường thở, hô hấp, tuần hoàn).",
+      "Oxy, truyền dịch/thuốc theo phác đồ.",
+      "Gọi hỗ trợ nội viện và chuẩn bị chuyển tuyến khẩn cấp.",
+      "Theo dõi sát trên đường vận chuyển."
+    ];
+    probability = 0.9;
+  }
+  // 2) CAM – RỐI LOẠN NHỊP NGUY HIỂM
+  else if (dangerousRhythm) {
+    riskClass = "risk-arrhythmia";
+    riskTitle = "CAM – RỐI LOẠN NHỊP NGUY HIỂM";
+    riskSubtitle = "AI Rhythm nghi ngờ rối loạn nhịp có nguy cơ đe dọa tính mạng.";
+    vitalExplain = "AI Safety: chưa ghi nhận tiêu chí sốc rõ, nhưng cần theo dõi sát.";
+    rhythmExplain = "AI Rhythm: ưu tiên xử trí rối loạn nhịp (sốc điện/thuốc).";
+    ischemiaExplain = "AI thiếu máu cơ tim sẽ đánh giá thêm sau khi kiểm soát nhịp.";
+    recommendations = [
+      "Xử trí rối loạn nhịp theo phác đồ (sốc điện/thuốc).",
+      "Theo dõi huyết động liên tục.",
+      "Liên hệ và hội chẩn tuyến trên.",
+      "Chuyển tuyến cấp cứu đến cơ sở có hồi sức/can thiệp."
+    ];
+    probability = 0.9;
+  }
+  // 3) VÀNG / XANH – THIẾU MÁU CƠ TIM
+  else {
+    let fusionScore = 0;
+    if (ecgIschemia) fusionScore += 4;
+    fusionScore += symptomsChecked;
+    fusionScore += riskChecked * 0.5;
+
+    const maxScore = 11;
+    probability = Math.max(0, Math.min(1, fusionScore / maxScore));
+
+    vitalExplain = "AI Safety: không ghi nhận tiêu chí sốc/suy hô hấp rõ.";
+    rhythmExplain = "AI Rhythm: không phát hiện rối loạn nhịp nguy hiểm.";
+    ischemiaExplain = "AI Thiếu máu cơ tim (Fusion): kết hợp ECG, triệu chứng, yếu tố nguy cơ.";
+
+    if (probability < 0.2) {
+      // 4) XANH – NGUY CƠ THẤP
+      riskClass = "risk-low";
+      riskTitle = "XANH – NGUY CƠ THIẾU MÁU CƠ TIM THẤP";
+      riskSubtitle = "Hiện ít gợi ý thiếu máu cơ tim cấp, có thể theo dõi tại tuyến cơ sở.";
+      recommendations = [
+        "Theo dõi triệu chứng và chỉ số sinh tồn tại tuyến cơ sở.",
+        "Lặp lại ECG nếu triệu chứng xuất hiện hoặc thay đổi.",
+        "Khám chuyên khoa tim mạch khi thuận tiện.",
+        "Giải thích cho người bệnh các dấu hiệu nguy hiểm cần quay lại ngay."
+      ];
     } else {
-      desc = "Nguy cơ cao.";
+      // 3) VÀNG – NGUY CƠ TRUNG BÌNH/CAO
+      riskClass = "risk-medium";
+      riskTitle = "VÀNG – NGUY CƠ THIẾU MÁU CƠ TIM TRUNG BÌNH/CAO";
+      riskSubtitle = "Có khả năng thiếu máu cơ tim, cần theo dõi sát và cân nhắc chuyển tuyến.";
+      recommendations = [
+        "Theo dõi sát triệu chứng và huyết động.",
+        "Lặp lại ECG sau 10–15 phút hoặc khi triệu chứng thay đổi.",
+        "Hội chẩn tuyến trên (trực tiếp hoặc từ xa).",
+        "Chuẩn bị chuyển tuyến nếu triệu chứng không cải thiện hoặc nặng lên."
+      ];
     }
-    riskText.textContent = desc;
-    container.classList.remove("d-none");
-  }
-}
-
-// ======================
-// Tính HEAR & phân tầng nguy cơ (demo)
-// ======================
-function computeHearAndRisk(onlyHear = false) {
-  collectBasicInfo();
-  collectSymptomInfo();
-
-  const { basic, symptoms, ecgAI } = state;
-  const { age, riskFactors, sbp, spo2 } = basic;
-
-  // H (History)
-  let H = 0;
-  if (symptoms.historyType === "typical") H = 2;
-  else if (symptoms.historyType === "atypical") H = 1;
-  else H = 0;
-
-  // E (ECG) – dựa vào AI mô phỏng
-  let E = 0;
-  if (ecgAI) {
-    if (ecgAI.st_elevation.present) E = 2;
-    else if (ecgAI.st_depression.present || ecgAI.t_wave_inversion.present)
-      E = 1;
-    else E = 0;
-  } else {
-    E = 0; // nếu chưa có ECG, cho 0 trong demo
   }
 
-  // A (Age)
-  let A = 0;
-  if (age > 65) A = 2;
-  else if (age >= 45) A = 1;
-  else A = 0;
-
-  // R (Risk factors)
-  let rfCount = 0;
-  if (riskFactors) {
-    Object.values(riskFactors).forEach((v) => {
-      if (v) rfCount += 1;
-    });
-  }
-  let R = 0;
-  if (rfCount >= 4) R = 2;
-  else if (rfCount >= 2) R = 1;
-  else R = 0;
-
-  const hearScore = H + E + A + R;
-  state.hearScore = hearScore;
-  state.hearDetail = { H, E, A, R, rfCount };
-
-  if (onlyHear) return;
-
-  // Xác định mức nguy cơ tổng hợp (4 màu) rất đơn giản (demo):
-  // - ĐỎ: HEAR >= 6 hoặc SBP < 90 hoặc SpO2 < 90 hoặc ST chênh lên
-  // - CAM: HEAR 4–5
-  // - VÀNG: HEAR 2–3
-  // - XANH: HEAR 0–1
-  let risk = "green";
-
-  if (hearScore >= 6 || sbp < 90 || spo2 < 90 || (ecgAI && ecgAI.st_elevation.present)) {
-    risk = "red";
-  } else if (hearScore >= 4) {
-    risk = "orange";
-  } else if (hearScore >= 2) {
-    risk = "yellow";
-  } else {
-    risk = "green";
-  }
-
-  state.riskLevel = risk;
-}
-
-// ======================
-// Render kết quả Step 4
-// ======================
-function renderResult() {
-  const { hearScore, hearDetail, riskLevel, basic, symptoms, ecgAI } = state;
-  const container = document.getElementById("riskCardContainer");
-  container.innerHTML = "";
-
-  let title = "";
-  let desc = "";
-  let colorClass = "";
-
-  if (riskLevel === "red") {
-    title = "Mức ĐỎ – Nguy cơ rất cao / nghi hội chứng vành cấp nguy hiểm";
-    desc =
-      "Xử trí cấp cứu ngay tại chỗ (ABC, oxy nếu SpO₂ thấp, đường truyền, aspirin nếu không chống chỉ định) và chuyển tuyến khẩn đến bệnh viện có can thiệp tim mạch, liên hệ trước khi chuyển.";
-    colorClass = "risk-red";
-  } else if (riskLevel === "orange") {
-    title = "Mức CAM – Nguy cơ cao";
-    desc =
-      "Cần chuyển bệnh nhân đến bệnh viện có khoa tim mạch/cấp cứu trong thời gian sớm, theo dõi mạch, huyết áp, SpO₂ trên đường chuyển, cân nhắc lặp lại ECG.";
-    colorClass = "risk-orange";
-  } else if (riskLevel === "yellow") {
-    title = "Mức VÀNG – Nguy cơ trung bình";
-    desc =
-      "Khuyến khích chuyển tuyến để làm thêm xét nghiệm (troponin, siêu âm tim...). Nếu giữ tại tuyến cơ sở, cần theo dõi sát, lặp lại ECG, dặn bệnh nhân quay lại ngay nếu đau tăng, khó thở, vã mồ hôi.";
-    colorClass = "risk-yellow";
-  } else {
-    title = "Mức XANH – Nguy cơ thấp (không loại trừ hoàn toàn bệnh mạch vành)";
-    desc =
-      "Có thể theo dõi ngoại trú, tìm thêm các nguyên nhân khác gây đau ngực (cơ xương, hô hấp, tiêu hoá...). Dặn bệnh nhân quay lại/đến cấp cứu nếu đau tăng, kéo dài, khó thở, vã mồ hôi, ngất.";
-    colorClass = "risk-green";
-  }
-
-  const card = document.createElement("div");
-  card.className = `risk-card ${colorClass}`;
-  card.innerHTML = `
-    <div class="d-flex justify-content-between align-items-start mb-2">
-      <div>
-        <div class="fw-bold mb-1">${title}</div>
-        <div class="badge bg-light text-dark badge-pill">
-          HEAR: ${hearScore} điểm
-        </div>
+  const probText = (probability * 100).toFixed(0) + "%";
+  const resultDiv = document.getElementById("resultRiskCard");
+  resultDiv.innerHTML = `
+    <div class="risk-card ${riskClass}">
+      <h2>${riskTitle}</h2>
+      <p>${riskSubtitle}</p>
+      <div class="pill">
+        <span class="pill-dot"></span>
+        Xác suất thiếu máu cơ tim (ước tính demo): <b>${probText}</b>
       </div>
     </div>
-    <div class="mb-1">
-      <strong>Khuyến cáo hành động (gợi ý):</strong>
-      <div>${desc}</div>
-    </div>
   `;
-  container.appendChild(card);
 
-  // Chi tiết HEAR
-  const hearDetailText = document.getElementById("hearDetailText");
-  if (hearDetail) {
-    hearDetailText.innerHTML = `
-      H (triệu chứng đau ngực): ${hearDetail.H} điểm<br>
-      E (ECG – AI mô phỏng): ${hearDetail.E} điểm<br>
-      A (tuổi): ${hearDetail.A} điểm (tuổi: ${basic.age || "?"})<br>
-      R (yếu tố nguy cơ): ${hearDetail.R} điểm (số yếu tố: ${hearDetail.rfCount})<br>
-      <strong>Tổng HEAR: ${hearScore} điểm</strong>
-    `;
-  }
+  document.getElementById("vitalSummary").textContent = vitalExplain;
+  document.getElementById("rhythmSummary").textContent = rhythmExplain;
+  document.getElementById("ischemiaSummary").textContent = ischemiaExplain;
 
-  // Tóm tắt ECG
-  const ecgSummaryText = document.getElementById("ecgSummaryText");
-  if (ecgAI) {
-    let summary = ecgAI.rhythm + ". ";
-    if (ecgAI.st_elevation.present) {
-      summary += `ST chênh lên ${ecgAI.st_elevation.max_mm} mm ở ${ecgAI.st_elevation.leads.join(", ")}. `;
-    }
-    if (ecgAI.st_depression.present) {
-      summary += `ST chênh xuống ở ${ecgAI.st_depression.leads.join(", ")}. `;
-    }
-    if (ecgAI.t_wave_inversion.present) {
-      summary += `T đảo ở ${ecgAI.t_wave_inversion.leads.join(", ")}. `;
-    }
-    if (
-      !ecgAI.st_elevation.present &&
-      !ecgAI.st_depression.present &&
-      !ecgAI.t_wave_inversion.present
-    ) {
-      summary += "Không thấy thay đổi ST–T rõ ràng (mô phỏng).";
-    }
-    ecgSummaryText.textContent = summary;
-  } else {
-    ecgSummaryText.textContent =
-      "Chưa có kết quả AI phân tích ECG (bước 2). Trong demo có thể bỏ qua.";
-  }
+  const recList = document.getElementById("recommendationList");
+  recList.innerHTML = "";
+  recommendations.forEach(r => {
+    const li = document.createElement("li");
+    li.textContent = r;
+    recList.appendChild(li);
+  });
+
+  const hear = calculateHEAR();
+  const hearDiv = document.getElementById("hearSummary");
+  hearDiv.innerHTML = `
+    <h3>HEAR score (tham khảo)</h3>
+    <p><b>Tổng điểm: ${hear.total} / 8</b></p>
+    <p>History: ${hear.H} • ECG: ${hear.E} • Age: ${hear.A} • Risk: ${hear.R}</p>
+    <p style="font-size:11px;color:#6b7280;">
+      HEAR score chỉ mang tính tham khảo, không thay thế phân tầng 4 màu của AI.
+    </p>
+  `;
+
+  goToStep(4);
 }
 
-// ======================
-// Thu gom tất cả input
-// ======================
-function collectAllInputs() {
-  collectBasicInfo();
-  collectSymptomInfo();
+function resetForm() {
+  document.querySelectorAll("input, select").forEach(el => {
+    if (el.type === "checkbox" || el.type === "radio") el.checked = false;
+    else if (el.tagName.toLowerCase() === "select") el.selectedIndex = 0;
+    else el.value = "";
+  });
+  ecgPreview.innerHTML = "Chưa có ảnh ECG.";
+  ecgStatus.textContent = "";
+  document.getElementById("resultRiskCard").innerHTML = "";
+  document.getElementById("vitalSummary").textContent = "";
+  document.getElementById("rhythmSummary").textContent = "";
+  document.getElementById("ischemiaSummary").textContent = "";
+  document.getElementById("recommendationList").innerHTML = "";
+  document.getElementById("hearSummary").innerHTML = "";
+  goToStep(1);
 }
-
-// ======================
-// Giải thích chi tiết
-// ======================
-function toggleExplain() {
-  const container = document.getElementById("explainContainer");
-  const txt = document.getElementById("explainToggleText");
-  const isHidden = container.classList.contains("d-none");
-  if (isHidden) {
-    container.classList.remove("d-none");
-    txt.textContent = "Ẩn giải thích chi tiết & hạn chế AI";
-  } else {
-    container.classList.add("d-none");
-    txt.textContent = "Xem giải thích chi tiết & hạn chế AI";
-  }
-}
-
-// ======================
-// Khởi động
-// ======================
-document.addEventListener("DOMContentLoaded", () => {
-  goToStep(0);
-});
